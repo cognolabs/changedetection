@@ -1,6 +1,7 @@
 """Video frame extraction and GPS synchronization service."""
 
 import json
+import logging
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -11,6 +12,8 @@ import gpxpy
 from backend.config import FRAMES_DIR, FRAME_INTERVAL_SEC
 from backend.utils.gps_utils import interpolate_gps
 
+logger = logging.getLogger(__name__)
+
 
 def extract_frames(
     video_path: Path,
@@ -20,6 +23,7 @@ def extract_frames(
     Extract frames from video at given interval.
     Returns list of dicts: {frame_number, timestamp_sec, frame_path}
     """
+    logger.info("Opening video: %s", video_path.name)
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         raise ValueError(f"Cannot open video: {video_path}")
@@ -33,32 +37,47 @@ def extract_frames(
     output_dir = FRAMES_DIR / video_name
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    frames = []
-    frame_idx = 0
-    extracted_count = 0
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    duration_sec = total_frames / fps
+    expected = total_frames // frame_skip
+    logger.info(
+        "Video info: %.1f fps, %d total frames, %.1fs duration, extracting ~%d frames",
+        fps, total_frames, duration_sec, expected,
+    )
 
-    while True:
+    frames = []
+    extracted_count = 0
+    frame_idx = 0
+
+    while frame_idx < total_frames:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
         ret, frame = cap.read()
         if not ret:
+            logger.warning("Failed to read frame at index %d, stopping", frame_idx)
             break
 
-        if frame_idx % frame_skip == 0:
-            timestamp_sec = frame_idx / fps
-            frame_filename = f"{video_name}_frame_{extracted_count:05d}.jpg"
-            frame_path = output_dir / frame_filename
-            cv2.imwrite(str(frame_path), frame)
+        timestamp_sec = frame_idx / fps
+        frame_filename = f"{video_name}_frame_{extracted_count:05d}.jpg"
+        frame_path = output_dir / frame_filename
+        cv2.imwrite(str(frame_path), frame)
 
-            frames.append({
-                "video_filename": video_path.name,
-                "frame_number": extracted_count,
-                "timestamp_sec": round(timestamp_sec, 3),
-                "frame_path": str(frame_path.relative_to(FRAMES_DIR)),
-            })
-            extracted_count += 1
+        extracted_count += 1
+        if extracted_count % 50 == 0 or extracted_count == 1:
+            logger.info(
+                "Extracted %d/%d frames (%.0f%%)",
+                extracted_count, expected, extracted_count / expected * 100 if expected else 0,
+            )
 
-        frame_idx += 1
+        frames.append({
+            "video_filename": video_path.name,
+            "frame_number": extracted_count - 1,
+            "timestamp_sec": round(timestamp_sec, 3),
+            "frame_path": str(frame_path.relative_to(FRAMES_DIR)),
+        })
+        frame_idx += frame_skip
 
     cap.release()
+    logger.info("Extraction complete: %d frames saved to %s", extracted_count, output_dir)
     return frames
 
 

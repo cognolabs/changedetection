@@ -38,6 +38,7 @@ export function uploadVideo(file) {
 export function extractFrames(videoFilename, interval = 1.0) {
   return api.post('/videos/extract-frames', null, {
     params: { video_filename: videoFilename, interval },
+    timeout: 600000,
   });
 }
 
