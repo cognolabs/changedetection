@@ -16,6 +16,7 @@ from backend.services.video_processor import (
     extract_frames,
     extract_gps_from_video,
     parse_gpx_file,
+    parse_track_file,
     assign_gps_to_frames,
 )
 from backend.services.geo_matcher import match_frame_to_property
@@ -84,13 +85,16 @@ def extract_video_frames(
         gps_points = _gpx_tracks[video_path.stem]
         logger.info("Using cached GPX track (%d points) for %s", len(gps_points), video_filename)
 
-    # Also check if a GPX file exists on disk for this video
+    # Also check if a track file exists on disk for this video
     if not gps_points:
-        for gpx_file in UPLOAD_DIR.glob("*.gpx"):
-            gps_points = parse_gpx_file(gpx_file)
+        for pattern in ("*.gpx", "*.kml", "*.kmz"):
+            for track_file in UPLOAD_DIR.glob(pattern):
+                gps_points = parse_track_file(track_file)
+                if gps_points:
+                    logger.info("Found track file on disk: %s (%d points)", track_file.name, len(gps_points))
+                    _gpx_tracks[video_path.stem] = gps_points
+                    break
             if gps_points:
-                logger.info("Found GPX file on disk: %s (%d points)", gpx_file.name, len(gps_points))
-                _gpx_tracks[video_path.stem] = gps_points
                 break
 
     # Assign GPS to frames
@@ -126,17 +130,21 @@ async def upload_gpx(
     video_name: str = Query("", description="Video filename this GPX track belongs to"),
     db: Session = Depends(get_db),
 ):
-    """Upload a companion GPX track for a video and assign GPS to existing frames."""
-    if not file.filename or not file.filename.lower().endswith(".gpx"):
-        raise HTTPException(400, "File must be .gpx")
+    """Upload a GPS track file (.gpx, .kml, .kmz) and assign GPS to existing frames."""
+    allowed = (".gpx", ".kml", ".kmz")
+    if not file.filename:
+        raise HTTPException(400, "No filename provided")
+    suffix = Path(file.filename).suffix.lower()
+    if suffix not in allowed:
+        raise HTTPException(400, f"File must be {', '.join(allowed)}")
 
-    gpx_path = UPLOAD_DIR / file.filename
-    with open(gpx_path, "wb") as f:
+    save_path = UPLOAD_DIR / file.filename
+    with open(save_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
 
-    points = parse_gpx_file(gpx_path)
+    points = parse_track_file(save_path)
     if not points:
-        raise HTTPException(400, "No track points found in GPX file")
+        raise HTTPException(400, "No track points found in file")
 
     logger.info("Parsed GPX: %d track points, duration %.1fs",
                 len(points), points[-1]["time"] if points else 0)

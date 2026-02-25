@@ -3,11 +3,13 @@
 import json
 import logging
 import subprocess
+import zipfile
 from pathlib import Path
 from typing import Optional
 
 import cv2
 import gpxpy
+from lxml import etree
 
 from backend.config import FRAMES_DIR, FRAME_INTERVAL_SEC
 from backend.utils.gps_utils import interpolate_gps
@@ -133,6 +135,90 @@ def parse_gpx_file(gpx_path: Path) -> list[dict]:
                 })
 
     return points
+
+
+def parse_kml_track(kml_path: Path) -> list[dict]:
+    """
+    Parse a KML or KMZ file and extract GPS track points.
+    Supports:
+      - <gx:Track> with <when> + <gx:coord> elements
+      - <LineString><coordinates> (evenly spaced, no timestamps)
+    Returns list of {time, lat, lon} with time as seconds from start.
+    """
+    suffix = kml_path.suffix.lower()
+
+    if suffix == ".kmz":
+        with zipfile.ZipFile(kml_path, "r") as zf:
+            kml_name = next(
+                (n for n in zf.namelist() if n.lower().endswith(".kml")),
+                None,
+            )
+            if not kml_name:
+                return []
+            kml_bytes = zf.read(kml_name)
+    else:
+        kml_bytes = kml_path.read_bytes()
+
+    root = etree.fromstring(kml_bytes)
+    ns = {"kml": "http://www.opengis.net/kml/2.2", "gx": "http://www.google.com/kml/ext/2.2"}
+
+    points: list[dict] = []
+
+    # Method 1: gx:Track with <when> and <gx:coord>
+    for track in root.iter("{http://www.google.com/kml/ext/2.2}Track"):
+        whens = track.findall("kml:when", ns) or track.findall("{http://www.opengis.net/kml/2.2}when")
+        coords = track.findall("gx:coord", ns) or track.findall("{http://www.google.com/kml/ext/2.2}coord")
+
+        if whens and coords and len(whens) == len(coords):
+            from datetime import datetime, timezone
+            start_time = None
+            for w, c in zip(whens, coords):
+                try:
+                    ts_str = w.text.strip()
+                    ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                    parts = c.text.strip().split()
+                    lon, lat = float(parts[0]), float(parts[1])
+                    if start_time is None:
+                        start_time = ts
+                    elapsed = (ts - start_time).total_seconds()
+                    points.append({"time": elapsed, "lat": lat, "lon": lon})
+                except (ValueError, IndexError):
+                    continue
+            if points:
+                return points
+
+    # Method 2: LineString coordinates (no timestamps — distribute evenly)
+    for ls in root.iter("{http://www.opengis.net/kml/2.2}LineString"):
+        coord_el = ls.find("{http://www.opengis.net/kml/2.2}coordinates")
+        if coord_el is None or not coord_el.text:
+            continue
+        raw_coords = coord_el.text.strip().split()
+        parsed = []
+        for c in raw_coords:
+            parts = c.split(",")
+            if len(parts) >= 2:
+                try:
+                    lon, lat = float(parts[0]), float(parts[1])
+                    parsed.append((lat, lon))
+                except ValueError:
+                    continue
+        if len(parsed) >= 2:
+            # Distribute points at 1-second intervals
+            for i, (lat, lon) in enumerate(parsed):
+                points.append({"time": float(i), "lat": lat, "lon": lon})
+            return points
+
+    return points
+
+
+def parse_track_file(file_path: Path) -> list[dict]:
+    """Parse any supported GPS track file (.gpx, .kml, .kmz) into track points."""
+    suffix = file_path.suffix.lower()
+    if suffix == ".gpx":
+        return parse_gpx_file(file_path)
+    elif suffix in (".kml", ".kmz"):
+        return parse_kml_track(file_path)
+    return []
 
 
 def assign_gps_to_frames(

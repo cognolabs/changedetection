@@ -253,8 +253,8 @@ export default function UploadPanel({ onRefresh }) {
         )}
 
         <FileUploadRow
-          label="GPX track (optional)"
-          accept=".gpx"
+          label="GPS track (GPX / KML / KMZ)"
+          accept=".gpx,.kml,.kmz"
           onUpload={(file) => {
             const vname = gpxVideoName || videoFilename?.replace(/\.[^.]+$/, '') || '';
             return uploadGpx(vname, file).then((r) => { onRefresh(); return r; });
