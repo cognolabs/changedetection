@@ -1,13 +1,18 @@
 """Inference router — YOLO model upload and inference execution."""
 
+import io
+import json
 import shutil
 from pathlib import Path
 
+import cv2
+import numpy as np
 from fastapi import APIRouter, Depends, UploadFile, File, Query, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
-from backend.config import MODELS_DIR
+from backend.config import MODELS_DIR, FRAMES_DIR
 from backend.models import VideoFrame, Prediction
 from backend.schemas import PredictionOut, StatusResponse
 from backend.services.detector import run_inference, get_available_models
@@ -110,3 +115,53 @@ def list_predictions(
     if model_name:
         query = query.filter(Prediction.model_name == model_name)
     return query.all()
+
+
+@router.get("/predictions/{prediction_id}/image")
+def get_prediction_image(prediction_id: int, db: Session = Depends(get_db)):
+    """Serve the frame image with bounding boxes and prediction label drawn on it."""
+    pred = db.query(Prediction).filter(Prediction.id == prediction_id).first()
+    if not pred:
+        raise HTTPException(404, "Prediction not found")
+
+    frame = db.query(VideoFrame).filter(VideoFrame.id == pred.frame_id).first()
+    if not frame:
+        raise HTTPException(404, "Frame not found")
+
+    full_path = FRAMES_DIR / frame.frame_path
+    if not full_path.exists():
+        raise HTTPException(404, "Frame file not found on disk")
+
+    img = cv2.imread(str(full_path))
+    if img is None:
+        raise HTTPException(500, "Could not read frame image")
+
+    h, w = img.shape[:2]
+
+    # Draw bounding box if detection model output
+    raw = {}
+    if pred.raw_output:
+        try:
+            raw = json.loads(pred.raw_output)
+        except json.JSONDecodeError:
+            pass
+
+    box_color = (0, 255, 0)  # green
+    label = f"{pred.predicted_class} {pred.confidence * 100:.0f}%"
+
+    if raw.get("type") == "detection" and raw.get("best_box"):
+        box = raw["best_box"]
+        x1, y1, x2, y2 = int(box[0]), int(box[1]), int(box[2]), int(box[3])
+        cv2.rectangle(img, (x1, y1), (x2, y2), box_color, 2)
+        # Label background
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+        cv2.rectangle(img, (x1, y1 - th - 10), (x1 + tw + 6, y1), box_color, -1)
+        cv2.putText(img, label, (x1 + 3, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
+    else:
+        # Classification model — draw label banner at top
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)
+        cv2.rectangle(img, (0, 0), (tw + 16, th + 16), box_color, -1)
+        cv2.putText(img, label, (8, th + 8), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 0), 2)
+
+    _, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 90])
+    return StreamingResponse(io.BytesIO(buf.tobytes()), media_type="image/jpeg")

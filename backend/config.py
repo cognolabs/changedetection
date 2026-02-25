@@ -21,4 +21,4 @@ BUFFER_METERS = 30  # Buffer distance for matching frames to properties
 
 # Change detection
 CONFIDENCE_THRESHOLD = 0.5  # Minimum confidence to flag a mismatch
-MIN_FRAMES_FOR_PREDICTION = 2  # Minimum frames needed for reliable prediction
+MIN_FRAMES_FOR_PREDICTION = 1  # Minimum frames needed for reliable prediction

@@ -1,5 +1,6 @@
 """Videos router — upload, frame extraction, GPS matching."""
 
+import logging
 import shutil
 from pathlib import Path
 
@@ -18,6 +19,9 @@ from backend.services.video_processor import (
     assign_gps_to_frames,
 )
 from backend.services.geo_matcher import match_frame_to_property
+from backend.utils.gps_utils import interpolate_gps
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -56,6 +60,19 @@ def extract_video_frames(
     if not video_path.exists():
         raise HTTPException(404, f"Video file not found: {video_filename}")
 
+    # Delete existing frames for this video to avoid duplicates
+    existing = (
+        db.query(VideoFrame)
+        .filter(VideoFrame.video_filename == video_filename)
+        .count()
+    )
+    if existing > 0:
+        logger.info("Deleting %d existing frames for %s", existing, video_filename)
+        db.query(VideoFrame).filter(
+            VideoFrame.video_filename == video_filename
+        ).delete()
+        db.commit()
+
     # Extract frames
     frames = extract_frames(video_path, interval_sec=interval)
 
@@ -65,10 +82,23 @@ def extract_video_frames(
     # Use GPX track if available
     if not gps_points and video_path.stem in _gpx_tracks:
         gps_points = _gpx_tracks[video_path.stem]
+        logger.info("Using cached GPX track (%d points) for %s", len(gps_points), video_filename)
+
+    # Also check if a GPX file exists on disk for this video
+    if not gps_points:
+        for gpx_file in UPLOAD_DIR.glob("*.gpx"):
+            gps_points = parse_gpx_file(gpx_file)
+            if gps_points:
+                logger.info("Found GPX file on disk: %s (%d points)", gpx_file.name, len(gps_points))
+                _gpx_tracks[video_path.stem] = gps_points
+                break
 
     # Assign GPS to frames
+    gps_assigned = 0
     if gps_points:
         frames = assign_gps_to_frames(frames, gps_points)
+        gps_assigned = sum(1 for f in frames if f.get("gps_lat") is not None)
+        logger.info("GPS assigned to %d/%d frames", gps_assigned, len(frames))
 
     # Save to database
     for frame_data in frames:
@@ -79,10 +109,12 @@ def extract_video_frames(
 
     return StatusResponse(
         status="success",
-        message=f"Extracted {len(frames)} frames from {video_filename}",
+        message=f"Extracted {len(frames)} frames from {video_filename}"
+                + (f" ({gps_assigned} with GPS)" if gps_assigned else " (no GPS)"),
         detail={
             "count": len(frames),
             "gps_available": bool(gps_points),
+            "gps_assigned": gps_assigned,
             "video": video_filename,
         },
     )
@@ -91,9 +123,10 @@ def extract_video_frames(
 @router.post("/upload-gpx", response_model=StatusResponse)
 async def upload_gpx(
     file: UploadFile = File(...),
-    video_name: str = Query(..., description="Video filename this GPX track belongs to"),
+    video_name: str = Query("", description="Video filename this GPX track belongs to"),
+    db: Session = Depends(get_db),
 ):
-    """Upload a companion GPX track for a video."""
+    """Upload a companion GPX track for a video and assign GPS to existing frames."""
     if not file.filename or not file.filename.lower().endswith(".gpx"):
         raise HTTPException(400, "File must be .gpx")
 
@@ -102,13 +135,40 @@ async def upload_gpx(
         shutil.copyfileobj(file.file, f)
 
     points = parse_gpx_file(gpx_path)
-    video_stem = Path(video_name).stem
-    _gpx_tracks[video_stem] = points
+    if not points:
+        raise HTTPException(400, "No track points found in GPX file")
+
+    logger.info("Parsed GPX: %d track points, duration %.1fs",
+                len(points), points[-1]["time"] if points else 0)
+
+    # Store in memory cache
+    if video_name:
+        video_stem = Path(video_name).stem
+        _gpx_tracks[video_stem] = points
+
+    # Assign GPS to ALL existing frames that don't have GPS yet
+    frames_without_gps = (
+        db.query(VideoFrame)
+        .filter(VideoFrame.gps_lat.is_(None))
+        .all()
+    )
+
+    updated = 0
+    for frame in frames_without_gps:
+        result = interpolate_gps(points, frame.timestamp_sec)
+        if result:
+            frame.gps_lat, frame.gps_lon = result
+            frame.gps_source = "gpx_interpolated"
+            updated += 1
+
+    db.commit()
+    logger.info("GPX upload: assigned GPS to %d/%d frames without GPS",
+                updated, len(frames_without_gps))
 
     return StatusResponse(
         status="success",
-        message=f"GPX loaded: {len(points)} track points for {video_name}",
-        detail={"points": len(points), "video": video_name},
+        message=f"GPX loaded: {len(points)} points, assigned GPS to {updated} frames",
+        detail={"points": len(points), "video": video_name, "frames_updated": updated},
     )
 
 
@@ -152,16 +212,18 @@ def geo_match_frames(
     db: Session = Depends(get_db),
 ):
     """Run spatial matching to link GPS-tagged frames to properties."""
-    # Get all frames with GPS but no property match
+    # Get all frames with GPS (re-match all, not just unmatched)
     frames = (
         db.query(VideoFrame)
         .filter(VideoFrame.gps_lat.isnot(None))
-        .filter(VideoFrame.matched_property_id.is_(None))
         .all()
     )
 
     if not frames:
-        return StatusResponse(status="info", message="No unmatched GPS frames found")
+        return StatusResponse(
+            status="info",
+            message="No frames with GPS coordinates found. Upload a GPX file first.",
+        )
 
     # Get all properties
     properties = db.query(Property).all()
@@ -173,16 +235,21 @@ def geo_match_frames(
         for p in properties
     ]
 
+    logger.info("Geo-matching %d GPS frames against %d properties (buffer=%dm)",
+                len(frames), len(properties), buffer_meters)
+
     matched_count = 0
     for frame in frames:
         prop_id = match_frame_to_property(
             frame.gps_lat, frame.gps_lon, prop_dicts, buffer_meters
         )
+        frame.matched_property_id = prop_id
         if prop_id is not None:
-            frame.matched_property_id = prop_id
             matched_count += 1
 
     db.commit()
+
+    logger.info("Geo-match result: %d/%d frames matched", matched_count, len(frames))
 
     return StatusResponse(
         status="success",

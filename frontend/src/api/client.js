@@ -89,6 +89,10 @@ export function listPredictions() {
   return api.get('/inference/predictions');
 }
 
+export function getPredictionImageUrl(predictionId) {
+  return `/api/inference/predictions/${predictionId}/image`;
+}
+
 // ─── Change Detection ────────────────────────────────────────────────────────
 
 export function detectChanges() {

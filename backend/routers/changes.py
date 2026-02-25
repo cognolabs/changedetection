@@ -3,11 +3,14 @@
 import csv
 import io
 import json
+import logging
 from collections import defaultdict
 
 from fastapi import APIRouter, Depends, Query, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from backend.database import get_db
 from backend.models import Property, VideoFrame, Prediction, ChangeReport
@@ -28,7 +31,25 @@ def run_change_detection(db: Session = Depends(get_db)):
     if not properties:
         return StatusResponse(status="info", message="No properties in database")
 
+    total_preds = db.query(Prediction).count()
+    total_frames_with_property = (
+        db.query(VideoFrame)
+        .filter(VideoFrame.matched_property_id.isnot(None))
+        .count()
+    )
+    total_frames_with_gps = (
+        db.query(VideoFrame)
+        .filter(VideoFrame.gps_lat.isnot(None))
+        .count()
+    )
+    logger.info(
+        "Change detection: %d properties, %d predictions total, "
+        "%d frames with GPS, %d frames matched to properties",
+        len(properties), total_preds, total_frames_with_gps, total_frames_with_property,
+    )
+
     props_with_preds = []
+    props_with_data = 0
     for prop in properties:
         # Get all predictions for frames matched to this property
         preds = (
@@ -38,6 +59,9 @@ def run_change_detection(db: Session = Depends(get_db)):
             .all()
         )
 
+        if preds:
+            props_with_data += 1
+
         props_with_preds.append({
             "property_id": prop.id,
             "existing_typology": prop.existing_typology,
@@ -46,6 +70,8 @@ def run_change_detection(db: Session = Depends(get_db)):
                 for p in preds
             ],
         })
+
+    logger.info("Properties with prediction data: %d/%d", props_with_data, len(properties))
 
     # Run change detection engine
     reports = detect_changes(props_with_preds)

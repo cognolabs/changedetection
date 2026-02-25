@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { getFrameImageUrl } from '../api/client';
+import { getPredictionImageUrl } from '../api/client';
 
 export default function PredictionList({ predictions, frames, onSelectProperty }) {
   const [filterClass, setFilterClass] = useState('all');
@@ -92,8 +92,8 @@ export default function PredictionList({ predictions, frames, onSelectProperty }
                   <div className="pred-card-body">
                     <div className="pred-frame-preview">
                       <img
-                        src={getFrameImageUrl(pred.frame_id)}
-                        alt={`Frame ${pred.frame_id}`}
+                        src={getPredictionImageUrl(pred.id)}
+                        alt={`Prediction ${pred.id}`}
                         className="pred-frame-img"
                         onError={(e) => { e.target.style.display = 'none'; }}
                       />
