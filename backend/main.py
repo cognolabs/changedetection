@@ -1,5 +1,12 @@
+import logging
 import sys
 from pathlib import Path
+
+# Configure logging so application logs show in the uvicorn console
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(levelname)s:     %(name)s - %(message)s",
+)
 
 # Ensure project root (parent of backend/) is on sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))

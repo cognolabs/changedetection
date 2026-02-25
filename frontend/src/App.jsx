@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import MapView from './components/MapView';
 import PropertyPanel from './components/PropertyPanel';
 import ChangeList from './components/ChangeList';
+import PredictionList from './components/PredictionList';
 import UploadPanel from './components/UploadPanel';
 import StatusBar from './components/StatusBar';
 import Legend from './components/Legend';
@@ -26,7 +27,7 @@ export default function App() {
   // ── UI state ─────────────────────────────────────────────────────────────
   const [selectedProperty, setSelectedProperty] = useState(null);
   const [selectedChange, setSelectedChange] = useState(null);
-  const [leftTab, setLeftTab] = useState('uploads'); // 'uploads' | 'changes'
+  const [leftTab, setLeftTab] = useState('uploads'); // 'uploads' | 'changes' | 'preds'
   const [refreshKey, setRefreshKey] = useState(0);
 
   // ── Data loaders ─────────────────────────────────────────────────────────
@@ -127,6 +128,15 @@ export default function App() {
             Pipeline
           </button>
           <button
+            className={`tab-btn ${leftTab === 'preds' ? 'active' : ''}`}
+            onClick={() => setLeftTab('preds')}
+          >
+            Preds
+            {predictions.length > 0 && (
+              <span className="badge">{predictions.length}</span>
+            )}
+          </button>
+          <button
             className={`tab-btn ${leftTab === 'changes' ? 'active' : ''}`}
             onClick={() => setLeftTab('changes')}
           >
@@ -142,6 +152,19 @@ export default function App() {
         <div className="sidebar-content">
           {leftTab === 'uploads' ? (
             <UploadPanel onRefresh={refresh} />
+          ) : leftTab === 'preds' ? (
+            <PredictionList
+              predictions={predictions}
+              frames={frames}
+              onSelectProperty={(propId) => {
+                if (geojson && geojson.features) {
+                  const feature = geojson.features.find(
+                    (f) => (f.id || f.properties?.id) === propId
+                  );
+                  if (feature) handlePropertySelect(feature);
+                }
+              }}
+            />
           ) : (
             <ChangeList
               changes={changes}
@@ -157,6 +180,7 @@ export default function App() {
           predictions={predictions}
           changes={changes}
           summary={summary}
+          onTabSelect={setLeftTab}
         />
       </aside>
 

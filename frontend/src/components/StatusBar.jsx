@@ -6,6 +6,7 @@ export default function StatusBar({
   predictions,
   changes,
   summary,
+  onTabSelect,
 }) {
   const propCount = properties?.length || 0;
   const frameCount = frames?.length || 0;
@@ -20,6 +21,7 @@ export default function StatusBar({
       ),
       count: propCount,
       label: 'Properties',
+      tab: 'uploads',
     },
     {
       icon: (
@@ -27,6 +29,7 @@ export default function StatusBar({
       ),
       count: frameCount,
       label: 'Frames',
+      tab: 'uploads',
     },
     {
       icon: (
@@ -34,6 +37,7 @@ export default function StatusBar({
       ),
       count: predCount,
       label: 'Preds',
+      tab: 'preds',
     },
     {
       icon: (
@@ -41,6 +45,7 @@ export default function StatusBar({
       ),
       count: changeCount,
       label: 'Changes',
+      tab: 'changes',
     },
   ];
 
@@ -48,7 +53,12 @@ export default function StatusBar({
     <div className="status-bar">
       <div className="status-grid">
         {items.map((item) => (
-          <div className="status-item" key={item.label}>
+          <div
+            className="status-item"
+            key={item.label}
+            style={{ cursor: 'pointer' }}
+            onClick={() => onTabSelect && onTabSelect(item.tab)}
+          >
             <span className="status-icon">{item.icon}</span>
             <span className="status-count">{item.count}</span>
             <span className="status-label">{item.label}</span>
