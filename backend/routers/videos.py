@@ -19,7 +19,7 @@ from backend.services.video_processor import (
     parse_track_file,
     assign_gps_to_frames,
 )
-from backend.services.geo_matcher import match_frame_to_property
+from backend.services.geo_matcher import match_frames_to_properties
 from backend.utils.gps_utils import interpolate_gps
 
 logger = logging.getLogger(__name__)
@@ -246,18 +246,22 @@ def geo_match_frames(
     logger.info("Geo-matching %d GPS frames against %d properties (buffer=%dm)",
                 len(frames), len(properties), buffer_meters)
 
+    # Build frame dicts for batch matching
+    frame_dicts = [
+        {"id": f.id, "gps_lat": f.gps_lat, "gps_lon": f.gps_lon}
+        for f in frames
+    ]
+    frame_by_id = {f.id: f for f in frames}
+
+    results = match_frames_to_properties(frame_dicts, prop_dicts, buffer_meters)
+
     matched_count = 0
-    for frame in frames:
-        prop_id = match_frame_to_property(
-            frame.gps_lat, frame.gps_lon, prop_dicts, buffer_meters
-        )
-        frame.matched_property_id = prop_id
+    for frame_id, prop_id in results.items():
+        frame_by_id[frame_id].matched_property_id = prop_id
         if prop_id is not None:
             matched_count += 1
 
     db.commit()
-
-    logger.info("Geo-match result: %d/%d frames matched", matched_count, len(frames))
 
     return StatusResponse(
         status="success",
