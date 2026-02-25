@@ -4,6 +4,7 @@ import { getPredictionImageUrl } from '../api/client';
 export default function PredictionList({ predictions, frames, onSelectProperty }) {
   const [filterClass, setFilterClass] = useState('all');
   const [expandedId, setExpandedId] = useState(null);
+  const [modalImg, setModalImg] = useState(null);
 
   // Build frame lookup
   const frameById = {};
@@ -90,7 +91,14 @@ export default function PredictionList({ predictions, frames, onSelectProperty }
 
                 {isExpanded && (
                   <div className="pred-card-body">
-                    <div className="pred-frame-preview">
+                    <div
+                      className="pred-frame-preview"
+                      style={{ cursor: 'pointer' }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setModalImg({ src: getPredictionImageUrl(pred.id), label: `Frame #${pred.frame_id}`, pred });
+                      }}
+                    >
                       <img
                         src={getPredictionImageUrl(pred.id)}
                         alt={`Prediction ${pred.id}`}
@@ -134,6 +142,33 @@ export default function PredictionList({ predictions, frames, onSelectProperty }
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Fullscreen Modal */}
+      {modalImg && (
+        <div className="frame-modal-overlay" onClick={() => setModalImg(null)}>
+          <div className="frame-modal" onClick={(e) => e.stopPropagation()}>
+            <button className="frame-modal-close" onClick={() => setModalImg(null)}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M18 6 6 18M6 6l12 12" />
+              </svg>
+            </button>
+            <img src={modalImg.src} alt={modalImg.label} className="frame-modal-img" />
+            <div className="frame-modal-info">
+              <span className="frame-modal-label">{modalImg.label}</span>
+              {modalImg.pred && (
+                <>
+                  <span className={`status-badge status-${modalImg.pred.predicted_class === 'commercial' ? 'flagged' : 'approved'}`}>
+                    {modalImg.pred.predicted_class}
+                  </span>
+                  <span className="pred-conf-badge">
+                    {((modalImg.pred.confidence || 0) * 100).toFixed(1)}%
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>
