@@ -143,6 +143,7 @@ def parse_kml_track(kml_path: Path) -> list[dict]:
     Supports:
       - <gx:Track> with <when> + <gx:coord> elements
       - <LineString><coordinates> (evenly spaced, no timestamps)
+    Handles KML files with or without XML namespaces.
     Returns list of {time, lat, lon} with time as seconds from start.
     """
     suffix = kml_path.suffix.lower()
@@ -160,17 +161,19 @@ def parse_kml_track(kml_path: Path) -> list[dict]:
         kml_bytes = kml_path.read_bytes()
 
     root = etree.fromstring(kml_bytes)
-    ns = {"kml": "http://www.opengis.net/kml/2.2", "gx": "http://www.google.com/kml/ext/2.2"}
-
     points: list[dict] = []
 
+    def find_all_local(parent, tag):
+        """Find all descendants matching local tag name regardless of namespace."""
+        return [e for e in parent.iter() if etree.QName(e.tag).localname == tag]
+
     # Method 1: gx:Track with <when> and <gx:coord>
-    for track in root.iter("{http://www.google.com/kml/ext/2.2}Track"):
-        whens = track.findall("kml:when", ns) or track.findall("{http://www.opengis.net/kml/2.2}when")
-        coords = track.findall("gx:coord", ns) or track.findall("{http://www.google.com/kml/ext/2.2}coord")
+    for track in find_all_local(root, "Track"):
+        whens = find_all_local(track, "when")
+        coords = find_all_local(track, "coord")
 
         if whens and coords and len(whens) == len(coords):
-            from datetime import datetime, timezone
+            from datetime import datetime
             start_time = None
             for w, c in zip(whens, coords):
                 try:
@@ -185,29 +188,32 @@ def parse_kml_track(kml_path: Path) -> list[dict]:
                 except (ValueError, IndexError):
                     continue
             if points:
+                logger.info("Parsed gx:Track from KML: %d points", len(points))
                 return points
 
     # Method 2: LineString coordinates (no timestamps — distribute evenly)
-    for ls in root.iter("{http://www.opengis.net/kml/2.2}LineString"):
-        coord_el = ls.find("{http://www.opengis.net/kml/2.2}coordinates")
-        if coord_el is None or not coord_el.text:
-            continue
-        raw_coords = coord_el.text.strip().split()
-        parsed = []
-        for c in raw_coords:
-            parts = c.split(",")
-            if len(parts) >= 2:
-                try:
-                    lon, lat = float(parts[0]), float(parts[1])
-                    parsed.append((lat, lon))
-                except ValueError:
-                    continue
-        if len(parsed) >= 2:
-            # Distribute points at 1-second intervals
-            for i, (lat, lon) in enumerate(parsed):
-                points.append({"time": float(i), "lat": lat, "lon": lon})
-            return points
+    for ls in find_all_local(root, "LineString"):
+        coord_els = find_all_local(ls, "coordinates")
+        for coord_el in coord_els:
+            if coord_el.text is None:
+                continue
+            raw_coords = coord_el.text.strip().split()
+            parsed = []
+            for c in raw_coords:
+                parts = c.split(",")
+                if len(parts) >= 2:
+                    try:
+                        lon, lat = float(parts[0]), float(parts[1])
+                        parsed.append((lat, lon))
+                    except ValueError:
+                        continue
+            if len(parsed) >= 2:
+                for i, (lat, lon) in enumerate(parsed):
+                    points.append({"time": float(i), "lat": lat, "lon": lon})
+                logger.info("Parsed LineString from KML: %d coordinate points", len(points))
+                return points
 
+    logger.warning("No track data found in KML file: %s", kml_path.name)
     return points
 
 
