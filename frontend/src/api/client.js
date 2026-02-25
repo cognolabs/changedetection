@@ -122,4 +122,8 @@ export function seedDemoData() {
   return api.post('/demo/seed');
 }
 
+export function clearAllData() {
+  return api.delete('/demo/clear');
+}
+
 export default api;

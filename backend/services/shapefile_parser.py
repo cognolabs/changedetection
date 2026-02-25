@@ -68,7 +68,7 @@ def parse_shapefile_zip(zip_path: Path) -> list[dict]:
                     # Merge survey attributes into extra_attributes
                     extra = json.loads(plot.get("extra_attributes") or "{}")
                     extra["survey_data"] = survey_data
-                    plot["extra_attributes"] = json.dumps(extra, ensure_ascii=False)
+                    plot["extra_attributes"] = json.dumps(extra, ensure_ascii=False, default=str)
 
                 properties.append(plot)
 

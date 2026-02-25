@@ -10,23 +10,22 @@ import {
   runInference,
   detectChanges,
   seedDemoData,
+  clearAllData,
 } from '../api/client';
 
-function FileUploadRow({ label, accept, onUpload, uploadLabel, hint }) {
+function FileUploadRow({ label, accept, onUpload, hint }) {
   const inputRef = useRef(null);
-  const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState(null);
 
-  async function handleUpload() {
-    if (!file) return;
+  async function handleFileChange(e) {
+    const selected = e.target.files?.[0];
+    if (!selected) return;
     setLoading(true);
     setFeedback(null);
     try {
-      await onUpload(file);
-      setFeedback({ type: 'success', message: `${file.name} uploaded.` });
-      setFile(null);
-      if (inputRef.current) inputRef.current.value = '';
+      await onUpload(selected);
+      setFeedback({ type: 'success', message: `${selected.name} uploaded.` });
     } catch (err) {
       const msg =
         err.response?.data?.detail ||
@@ -35,6 +34,7 @@ function FileUploadRow({ label, accept, onUpload, uploadLabel, hint }) {
       setFeedback({ type: 'error', message: msg });
     } finally {
       setLoading(false);
+      if (inputRef.current) inputRef.current.value = '';
     }
   }
 
@@ -48,25 +48,15 @@ function FileUploadRow({ label, accept, onUpload, uploadLabel, hint }) {
           type="file"
           accept={accept}
           className="file-input"
-          onChange={(e) => {
-            setFile(e.target.files?.[0] || null);
-            setFeedback(null);
-          }}
+          disabled={loading}
+          onChange={handleFileChange}
         />
-        <button
-          className="btn btn-primary btn-sm"
-          onClick={handleUpload}
-          disabled={!file || loading}
-        >
-          {loading ? (
-            <span className="btn-loading">
-              <span className="spinner" />
-              Uploading...
-            </span>
-          ) : (
-            uploadLabel || 'Upload'
-          )}
-        </button>
+        {loading && (
+          <span className="btn-loading">
+            <span className="spinner" />
+            Uploading...
+          </span>
+        )}
       </div>
       {feedback && (
         <div className={`feedback feedback-${feedback.type} feedback-sm`}>
@@ -151,18 +141,33 @@ export default function UploadPanel({ onRefresh }) {
 
   return (
     <div className="upload-panel">
-      {/* Demo Data */}
+      {/* Demo Data / Clear */}
       <div className="upload-section demo-section">
-        <button
-          className="btn btn-demo"
-          disabled={!!actionLoading}
-          onClick={() => runAction('demo', () => seedDemoData())}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/><polyline points="21 3 21 9 15 9"/></svg>
-          {actionLoading === 'demo' ? 'Loading Demo...' : 'Load Demo Data'}
-        </button>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <button
+            className="btn btn-demo"
+            disabled={!!actionLoading}
+            onClick={() => runAction('demo', () => seedDemoData())}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/><polyline points="21 3 21 9 15 9"/></svg>
+            {actionLoading === 'demo' ? 'Loading Demo...' : 'Load Demo Data'}
+          </button>
+          <button
+            className="btn btn-danger"
+            disabled={!!actionLoading}
+            onClick={() => {
+              if (window.confirm('Clear ALL data? This cannot be undone.')) {
+                runAction('clear', () => clearAllData());
+              }
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            {actionLoading === 'clear' ? 'Clearing...' : 'Clear All Data'}
+          </button>
+        </div>
         <span className="demo-hint">Prayagraj Civil Lines sample dataset</span>
         <ActionFeedback actionKey="demo" />
+        <ActionFeedback actionKey="clear" />
       </div>
 
       <div className="section-divider" />
@@ -199,7 +204,6 @@ export default function UploadPanel({ onRefresh }) {
           label="Shapefile ZIP or KML/KMZ"
           accept=".zip,.kml,.kmz"
           onUpload={(file) => uploadProperties(file).then((r) => { onRefresh(); return r; })}
-          uploadLabel="Upload"
         />
       </div>
 
@@ -225,7 +229,6 @@ export default function UploadPanel({ onRefresh }) {
               return r;
             })
           }
-          uploadLabel="Upload"
         />
 
         {videoFilename && (
@@ -256,7 +259,6 @@ export default function UploadPanel({ onRefresh }) {
             const vname = gpxVideoName || videoFilename?.replace(/\.[^.]+$/, '') || '';
             return uploadGpx(vname, file).then((r) => { onRefresh(); return r; });
           }}
-          uploadLabel="Upload"
         />
       </div>
 
@@ -278,7 +280,6 @@ export default function UploadPanel({ onRefresh }) {
               return r;
             })
           }
-          uploadLabel="Upload"
         />
       </div>
 

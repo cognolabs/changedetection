@@ -312,3 +312,19 @@ def seed_demo_data(db: Session = Depends(get_db)):
             "confirmed": 5,
         },
     )
+
+
+@router.delete("/clear", response_model=StatusResponse)
+def clear_all_data(db: Session = Depends(get_db)):
+    """Delete all data from every table."""
+    changes = db.query(ChangeReport).delete()
+    preds = db.query(Prediction).delete()
+    frames = db.query(VideoFrame).delete()
+    props = db.query(Property).delete()
+    db.commit()
+
+    return StatusResponse(
+        status="success",
+        message=f"Cleared {props} properties, {frames} frames, {preds} predictions, {changes} change reports",
+        detail={"properties": props, "frames": frames, "predictions": preds, "change_reports": changes},
+    )

@@ -109,7 +109,7 @@ def parse_kml_bytes(kml_bytes: bytes, source_filename: str) -> list[dict]:
             "centroid_lat": centroid_lat,
             "centroid_lon": centroid_lon,
             "source_file": source_filename,
-            "extra_attributes": json.dumps(extra) if extra else None,
+            "extra_attributes": json.dumps(extra, ensure_ascii=False, default=str) if extra else None,
         })
 
     return properties
